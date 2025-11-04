@@ -15,13 +15,22 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from pathlib import Path
 from typing import List, Sequence, Tuple
 
-from .analyzer import PolylineReport, analyze_polyline
-from .camera import Camera
-from .geometry import PointMM, compute_px_per_mm, mm_to_px
-from .threshold import binarize_line
+if __package__ in (None, ""):
+    # Allow running the script directly (python main.py) by adding the project root to sys.path.
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
+    from tile_analyzer.analyzer import PolylineReport, analyze_polyline
+    from tile_analyzer.camera import Camera
+    from tile_analyzer.geometry import PointMM, compute_px_per_mm, mm_to_px
+    from tile_analyzer.threshold import binarize_line
+else:
+    from .analyzer import PolylineReport, analyze_polyline
+    from .camera import Camera
+    from .geometry import PointMM, compute_px_per_mm, mm_to_px
+    from .threshold import binarize_line
 
 
 def _parse_point_pairs(text: str) -> List[PointMM]:

@@ -5,43 +5,66 @@ from __future__ import annotations
 from typing import Optional, Tuple
 
 import cv2
+import numpy as np
+from libcamera import Transform, controls
+from picamera2 import Picamera2
 
 
 class Camera:
-    """Manage access to the IMX219 camera using OpenCV VideoCapture."""
+    """Manage access to the IMX219 camera using libcamera via Picamera2."""
 
-    def __init__(self, index: int = 0, resolution: Tuple[int, int] = (3280, 2464)) -> None:
-        self.index = index
+    def __init__(
+        self,
+        resolution: Tuple[int, int] = (3280, 2464),
+        sensor_index: int = 0,
+        use_manual_exposure: bool = False,
+    ) -> None:
         self.resolution = resolution
-        self._capture: Optional[cv2.VideoCapture] = None
+        self.sensor_index = sensor_index
+        self.use_manual_exposure = use_manual_exposure
+        self._picam2: Optional[Picamera2] = None
 
-    def open(self) -> cv2.VideoCapture:
-        """Open the camera if needed and apply the requested resolution."""
-        if self._capture is None:
-            capture = cv2.VideoCapture(self.index)
-            if not capture.isOpened():
-                raise RuntimeError(f"Failed to open camera at index {self.index}")
+    def open(self) -> Picamera2:
+        """Open the libcamera pipeline and apply the configuration."""
+        if self._picam2 is None:
+            picam2 = Picamera2(camera_num=self.sensor_index)
+            transform = Transform(hflip=True)
+            config = picam2.create_still_configuration(
+                main={"size": self.resolution, "format": "RGB888"},
+                transform=transform,
+                buffer_count=1,
+            )
+            picam2.configure(config)
 
-            width, height = self.resolution
-            capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+            if self.use_manual_exposure:
+                picam2.set_controls({"AeEnable": False, "ExposureTime": 8000, "AnalogueGain": 2.0})
+            else:
+                picam2.set_controls(
+                    {
+                        "AeEnable": True,
+                        "AwbEnable": True,
+                        "NoiseReductionMode": controls.draft.NoiseReductionModeEnum.Off,
+                    }
+                )
 
-            self._capture = capture
-        return self._capture
+            picam2.start()
+            self._picam2 = picam2
+        return self._picam2
 
     def capture_frame(self) -> "cv2.Mat":
         """Return a single BGR frame from the camera."""
-        capture = self.open()
-        ok, frame = capture.read()
-        if not ok or frame is None:
-            raise RuntimeError("Failed to read frame from camera")
-        return frame
+        picam2 = self.open()
+        frame_rgb: np.ndarray = picam2.capture_array("main")
+        if frame_rgb is None:
+            raise RuntimeError("Failed to capture frame from Picamera2")
+        return cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
 
     def release(self) -> None:
-        """Release the camera capture object."""
-        if self._capture is not None:
-            self._capture.release()
-            self._capture = None
+        """Stop and close the libcamera pipeline."""
+        if self._picam2 is not None:
+            self._picam2.stop()
+            self._picam2.close()
+            self._picam2 = None
 
     def __enter__(self) -> "Camera":
         self.open()
